@@ -1,0 +1,79 @@
+# =====================================
+# GLUE JOB 4 : summarized-final
+# =====================================
+
+import sys
+from datetime import date
+from pyspark.context import SparkContext
+from pyspark.sql.functions import lit, current_timestamp
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from awsglue.utils import getResolvedOptions
+
+# Get parameters
+args = getResolvedOptions(
+    sys.argv,
+    [
+        'JOB_NAME',
+        'BUCKET',
+        'SOURCE_STAGE',
+        'TARGET_STAGE',
+        'GLUE_DB'
+    ]
+)
+
+# Glue/Spark setup
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+today = date.today().strftime("%Y-%m-%d")
+
+source_path = f"s3://{args['BUCKET']}/{args['SOURCE_STAGE']}/{today}/"
+output_path = f"s3://{args['BUCKET']}/{args['TARGET_STAGE']}/"
+
+print(f"\nStarting Job {args['JOB_NAME']}\n")
+print(f"\nSource path: {source_path}\n")
+
+# Read summarized data
+df = spark.read.parquet(source_path)
+
+print(f"\nRows read from source: {df.count()}\n")
+
+# Add metadata + partition column
+df = (
+    df.withColumn("date", lit(today))
+      .withColumn("modified_at", current_timestamp())
+      .withColumn("source_path", lit(source_path))
+      .withColumn("target_path", lit(output_path))
+)
+
+print("\nMetadata columns added successfully\n")
+
+# Save as Glue Catalog table with partitions
+print(
+    f"\nWriting data to Glue table "
+    f"{args['GLUE_DB']}.final_organised_data\n"
+)
+
+(
+    df.write
+      .format("parquet")
+      .mode("append")
+      .option("path", output_path)
+      .partitionBy("date")
+      .saveAsTable(
+          f"{args['GLUE_DB']}.final_organised_data"
+      )
+)
+
+print(
+    f"\nTable {args['GLUE_DB']}.final_organised_data "
+    f"saved with partition date={today}\n"
+)
+
+print("\nJob completed successfully")
+
+job.commit()
