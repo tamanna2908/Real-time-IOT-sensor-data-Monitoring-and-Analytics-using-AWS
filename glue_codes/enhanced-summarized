@@ -1,0 +1,76 @@
+# =========================================
+# GLUE JOB 3 : enhanced-summarized
+# =========================================
+
+import sys
+from datetime import date
+from pyspark.context import SparkContext
+from pyspark.sql.functions import when, lit, current_timestamp
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from awsglue.utils import getResolvedOptions
+
+# Get parameters
+args = getResolvedOptions(
+    sys.argv,
+    ['JOB_NAME', 'BUCKET', 'SOURCE_STAGE', 'TARGET_STAGE']
+)
+
+# Glue/Spark setup
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+today = date.today().strftime("%Y-%m-%d")
+
+source_path = f"s3://{args['BUCKET']}/{args['SOURCE_STAGE']}/{today}/"
+target_path = f"s3://{args['BUCKET']}/{args['TARGET_STAGE']}/{today}/"
+
+print(f"Starting Job {args['JOB_NAME']}")
+print(f"Reading enhanced data from {source_path}")
+
+# Read enhanced data
+df = spark.read.parquet(source_path)
+
+print("Applying row-level transformations...")
+
+# Row-level transformations
+df = (
+    df.withColumn(
+        "is_high_temp",
+        when(df.temperature > 35, lit(1)).otherwise(lit(0))
+    )
+    .withColumn(
+        "is_high_humidity",
+        when(df.humidity > 60, lit(1)).otherwise(lit(0))
+    )
+    .withColumn(
+        "is_high_pressure",
+        when(df.pressure > 1020, lit(1)).otherwise(lit(0))
+    )
+    .withColumn(
+        "is_low_battery",
+        when(df.battery_level < 30, lit(1)).otherwise(lit(0))
+    )
+    .withColumn(
+        "status_flag",
+        when(df.status == "error", lit("NeedsAttention"))
+        .otherwise(lit("OK"))
+    )
+    .withColumn("summary_date", lit(today))
+    .withColumn("processed_time", current_timestamp())
+    .withColumn("modified_at", current_timestamp())
+    .withColumn("source_path", lit(source_path))
+    .withColumn("target_path", lit(target_path))
+)
+
+print(f"Writing enriched data to {target_path}")
+
+# Write summarized data
+df.write.mode("overwrite").parquet(target_path)
+
+print("Job completed successfully")
+
+job.commit()
