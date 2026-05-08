@@ -1,0 +1,56 @@
+# =====================================
+# LAMBDA FUNCTION 1 : IotDataProcessor
+# =====================================
+
+import json
+import boto3
+import datetime
+import random
+
+s3 = boto3.client('s3')
+
+BUCKET = "iot-simulator-data-bucket"
+
+def lambda_handler(event, context):
+
+    today = datetime.date.today().strftime("%Y-%m-%d")
+
+    events = []
+
+    # Generate 25 sensor events
+    for i in range(25):
+
+        device_id = f"device_{random.randint(1, 500)}"
+
+        payload = {
+            "device_id": device_id,
+            "temperature": round(random.uniform(20, 35), 2),
+            "humidity": round(random.uniform(30, 70), 2),
+            "pressure": round(random.uniform(950, 1050), 2),
+            "battery_level": random.randint(20, 100),
+            "status": random.choice(["active", "idle", "error"]),
+            "timestamp": datetime.datetime.utcnow().isoformat()
+        }
+
+        events.append(payload)
+
+    # Create S3 file path
+    key = (
+        f"raw/{today}/"
+        f"batch_{datetime.datetime.utcnow().isoformat()}.json"
+    )
+
+    # Upload JSON file to S3
+    s3.put_object(
+        Bucket=BUCKET,
+        Key=key,
+        Body=json.dumps(events)
+    )
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "message": "Generated 25 IoT events",
+            "file": f"s3://{BUCKET}/{key}"
+        })
+    }
