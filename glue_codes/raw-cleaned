@@ -1,0 +1,60 @@
+
+import sys
+from datetime import date
+from pyspark.context import SparkContext
+from pyspark.sql.functions import col, lit, current_timestamp
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from awsglue.utils import getResolvedOptions
+
+# Get parameters
+args = getResolvedOptions(
+    sys.argv,
+    ['JOB_NAME', 'BUCKET', 'SOURCE_STAGE', 'TARGET_STAGE']
+)
+
+# Glue/Spark setup
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+today = date.today().strftime("%Y-%m-%d")
+
+source_path = f"s3://{args['BUCKET']}/{args['SOURCE_STAGE']}/{today}/"
+target_path = f"s3://{args['BUCKET']}/{args['TARGET_STAGE']}/{today}/"
+
+print(f"Reading raw data from {source_path}")
+
+# Read raw JSON
+df = spark.read.json(source_path)
+
+# Normalize column names
+for c in df.columns:
+    df = df.withColumnRenamed(c, c.lower())
+
+# Cleaning transformations
+df = (
+    df.dropna()
+      .dropDuplicates()
+      .filter((col("temperature") >= -10) & (col("temperature") <= 100))
+      .filter((col("humidity") >= 0) & (col("humidity") <= 100))
+)
+
+# Add metadata columns
+df = (
+    df.withColumn("cleaned_date", lit(today))
+      .withColumn("modified_at", current_timestamp())
+      .withColumn("source_path", lit(source_path))
+      .withColumn("target_path", lit(target_path))
+)
+
+print(f"Writing cleaned data to {target_path}")
+
+# Write cleaned data
+df.write.mode("overwrite").parquet(target_path)
+
+print("Job completed successfully")
+
+job.commit()
