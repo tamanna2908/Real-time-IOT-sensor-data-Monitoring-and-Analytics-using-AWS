@@ -1,0 +1,73 @@
+# ====================================
+# GLUE JOB 2 : cleaned-enhanced
+# ====================================
+
+import sys
+from datetime import date
+from pyspark.context import SparkContext
+from pyspark.sql.functions import when, current_timestamp, lit
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from awsglue.utils import getResolvedOptions
+
+# Get parameters
+args = getResolvedOptions(
+    sys.argv,
+    ['JOB_NAME', 'BUCKET', 'SOURCE_STAGE', 'TARGET_STAGE']
+)
+
+# Glue/Spark setup
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+today = date.today().strftime("%Y-%m-%d")
+
+source_path = f"s3://{args['BUCKET']}/{args['SOURCE_STAGE']}/{today}/"
+target_path = f"s3://{args['BUCKET']}/{args['TARGET_STAGE']}/{today}/"
+
+print(f"Starting Job {args['JOB_NAME']}")
+print(f"Reading cleaned data from {source_path}")
+
+# Read cleaned data
+df = spark.read.parquet(source_path)
+
+# Transformations
+df = (
+    df.withColumn(
+        "temperature_status",
+        when(df.temperature > 35, "High").otherwise("Normal")
+    )
+    .withColumn(
+        "humidity_status",
+        when(df.humidity > 50, "Wet").otherwise("Normal")
+    )
+    .withColumn(
+        "pressure_status",
+        when(df.pressure > 1020, "High").otherwise("Normal")
+    )
+    .withColumn(
+        "battery_status",
+        when(df.battery_level < 30, "Low").otherwise("OK")
+    )
+    .withColumn("ingestion_time", current_timestamp())
+)
+
+# Add metadata columns
+df = (
+    df.withColumn("enhanced_date", lit(today))
+      .withColumn("modified_at", current_timestamp())
+      .withColumn("source_path", lit(source_path))
+      .withColumn("target_path", lit(target_path))
+)
+
+print(f"Writing enhanced data to {target_path}")
+
+# Write enhanced data
+df.write.mode("overwrite").parquet(target_path)
+
+print("Job completed successfully")
+
+job.commit()
