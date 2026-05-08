@@ -1,0 +1,42 @@
+# ==========================================
+# LAMBDA FUNCTION 2 : trigger-glue-workflow
+# ==========================================
+
+import boto3
+import json
+
+glue = boto3.client('glue')
+
+def lambda_handler(event, context):
+
+    print("SNS event received:")
+    print(json.dumps(event))
+
+    try:
+
+        # Trigger Glue Workflow
+        response = glue.start_workflow_run(
+            Name="IotPipelineWorkflow"
+        )
+
+        print("Glue workflow triggered:")
+        print(response)
+
+        return {
+            "statusCode": 200,
+            "body": json.dumps({
+                "message": "Glue workflow started successfully"
+            })
+        }
+
+    except Exception as e:
+
+        print("Glue trigger failed:")
+        print(str(e))
+
+        return {
+            "statusCode": 500,
+            "body": json.dumps({
+                "error": str(e)
+            })
+        }
